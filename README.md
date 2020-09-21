@@ -1,2 +1,3 @@
-# -do_not_use-bash
-This repo is full of code that shouldn't be used. 
+# Do not use
+
+This is a _place_ for scripts that can be useful.

@@ -14,28 +14,32 @@ fi
 setup() {
   :  # true
   set -o posix
-  set -euo pipefail
+#  set -e  # find will give error when searching from root
+  set -uo pipefail
+#  set -o xtrace  # debugger
 }
 
 cleanup() {
   # cleanup code here
   set +o posix
-  set +euo pipefail
+#  set +e
+  set +uo pipefail
   $ret $1
 }
 
-_print_help() {
-  cat <<'HEREDOC'
+help_doc() {
+  cat <<'HELPDOC'
   Finds directories up the directory structure
   Gives an option to change to that found directory
 
-  Usage: source moveto.bash [-v verbose] [-w workdir] <dir name to search>
+  Usage: source moveto.bash [-v] [-w <work dir>] <dir name to search>
     -h, --help      This text
-    -v, --verbose   Show more info
-    -w, --workdir   Set a directory other than the current one
+    -v, --verbose   Set verbose flag
+    -w, --workdir   Work from a directory other than the present working directory
 
+  Expects one (1) argument as a name of a directory
   Example: source moveto.bash -v --workdir /home/ .ssh
-HEREDOC
+HELPDOC
 }
 
 setup  # init
@@ -62,7 +66,7 @@ v=false # verbose
 workdir=false # directory to look from
 while true; do
   case "$1" in
-  -h | --help) _print_help; $ret 5 ;;  # return or exit
+  -h | --help) help_doc; $ret 5 ;;  # return or exit
   -v | --verbose) v=true; shift ;;
   -w | --workdir) workdir="$2"; shift 2 ;;
   --) shift; break ;;
@@ -72,7 +76,7 @@ done
 
 # handle non-option arguments
 if [[ $# -ne 1 ]]; then
-  echo "$0: A single input file is required."
+  printf "%s\n" "Usage: source moveto.bash [-v verbose] [-w workdir] <dir name to search>"
   $ret 4
 fi
 
@@ -81,34 +85,24 @@ if [ ! -d "$workdir" ]; then # if -w|--workdir is not a directory
   workdir="$curdir" # set workdir as cur
 fi
 cd "$workdir" || cleanup 6  # navigate to the working directory
-
-if $v; then printf "verbose: %s, search directory: %s, work directory: %s" "$v" "$1" "$(pwd)"; fi
+if $v; then printf "verbose: %s, search directory: %s, work directory: %s\n" "$v" "$1" "$workdir"; fi
 
 dir_array=()  # a/301059  &  shellcheck/wiki/SC2044
 dir_arr_len=0
 tmpfile=$(mktemp)
-find "$(pwd)" -mindepth 1 -type d -print0 > "$tmpfile"
+find "$(pwd)"  -mindepth 1 -type d -print0 > "$tmpfile" 2> /dev/null  # stderr catch
 while IFS= read -r -d '' path; do
-  dir_array[dir_arr_len++]="$path"
-#  dir_array+=("$path")  # bash 3.1
+  base_name="${path##*/}"  # faster than $(basename "$path")
+  if [[ "$base_name" == "$1" ]]; then
+    if $v; then printf "found: %s\n" "$path"; fi
+    dir_array[dir_arr_len++]="$path"  #  dir_array+=("$path") available in bash 3.1
+  fi
 done < "$tmpfile"
 rm "$tmpfile"
 
-if $v; then printf "nr. dirs read: %q\n" "${#dir_array[@]}"; fi
-
-found_array=()
-dir_arr_len=0
-for path in "${dir_array[@]}"; do
-  base_name="${path##*/}"  # faster than $(basename "$path")
-  if [[ "$base_name" == "$1" ]]; then
-    found_array[dir_arr_len++]="$path"  # append path to array
-    #  found_array+=("$path")  # bash 3.1
-    if $v; then printf "found: %s\n" "$path"; fi
-  fi
-done
-
-if $v; then printf "nr. dirs found: %q\n" "${#found_array[@]}"; fi
-choice_array=("$curdir" "${found_array[@]}")  # add the default value
+length_array=${#dir_array[@]}  # count of items in array
+if $v; then printf "nr. dirs found: %q\n" "$length_array"; fi
+choice_array=("$curdir" "${dir_array[@]}")  # add the default value
 
 # loop over results and assign numbers
 for i in "${!choice_array[@]}"; do
@@ -118,15 +112,16 @@ done
 # ask user which number
 read -p "Move to directory [0]: " user_choice
 user_choice=${user_choice:-0} # parameter expansion
+if $v; then printf "given choice: %s\n" "$user_choice"; fi
 
 # check if (1, 2, 3, ...) is one of the user choice, negative is invalid
-if [[ $user_choice -lt 0 ]] || [[ $user_choice -gt ${#found_array[@]} ]]; then
+if [[ $user_choice -lt 0 ]] || [[ $user_choice -gt $length_array ]]; then
   printf "%s is not in one of the choices \n" "$user_choice"
   user_choice=0
 fi
 
-if $v; then printf "user choice: %s\n" "$user_choice"; fi
-cd "${found_array[$user_choice]}" || "$curdir" # Change the shell working directory.
+if $v; then printf "change to dir: %s\n" "${choice_array["$user_choice"]}"; fi
+cd "${choice_array[$user_choice]}" || "$curdir" # Change the shell working directory.
 
 if $v; then printf "previous dir: %s\n" "$curdir"; fi
 if $v; then printf "current dir: %s\n" "$(pwd)"; fi
